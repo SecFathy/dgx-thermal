@@ -20,8 +20,18 @@ workflows:
             --no-codesign \
             --target=lib/main.dart
 
+      - name: Locate and copy IPA
+        script: |
+          find . -name "*.ipa" 2>/dev/null
+          find . -name "*.xcarchive" 2>/dev/null
+          mkdir -p $CM_BUILD_DIR/output
+          find . -name "*.ipa" -exec cp {} $CM_BUILD_DIR/output/ \; 2>/dev/null || true
+
     artifacts:
+      - $CM_BUILD_DIR/output/*.ipa
       - build/ios/ipa/*.ipa
+      - build/ios/archive/*.xcarchive
+      - "**/*.ipa"
       - /tmp/xcodebuild_logs/*.log
 
     publishing:
