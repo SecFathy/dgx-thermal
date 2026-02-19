@@ -3,15 +3,13 @@ workflows:
     name: DGX Thermal — iOS IPA
     max_build_duration: 60
     instance_type: mac_mini_m2
-    integrations:
-      app_store_connect: codemagic_api_key   # set this in Codemagic UI → Teams → Integrations
 
     environment:
       flutter: stable
       xcode: latest
       cocoapods: default
       ios_signing:
-        distribution_type: ad_hoc            # install on registered devices without App Store
+        distribution_type: ad_hoc
         bundle_identifier: com.secfathy.dgxThermal
 
     scripts:
@@ -20,14 +18,13 @@ workflows:
 
       - name: Install CocoaPods
         script: |
-          cd ios
-          pod install
+          cd ios && pod install
 
       - name: Build iOS IPA
         script: |
-          flutter build ipa \
-            --release \
-            --export-options-plist=/Users/builder/export_options.plist
+          flutter build ipa --release \
+            --target=lib/main.dart \
+            --suppress-analytics
 
     artifacts:
       - build/ios/ipa/*.ipa
@@ -36,7 +33,7 @@ workflows:
     publishing:
       email:
         recipients:
-          - secfathy@icloud.com          # change to your email
+          - secfathy@icloud.com
         notify:
           success: true
           failure: true
