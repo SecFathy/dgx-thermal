@@ -3,8 +3,11 @@ import 'package:flutter/cupertino.dart';
 import 'package:provider/provider.dart';
 import 'providers/connection_provider.dart';
 import 'screens/connection_screen.dart';
+import 'services/alert_service.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await AlertService.initialize();
   runApp(
     ChangeNotifierProvider(
       create: (_) => ConnectionProvider(),

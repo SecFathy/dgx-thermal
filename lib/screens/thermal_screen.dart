@@ -4,8 +4,10 @@ import 'package:provider/provider.dart';
 import '../providers/connection_provider.dart';
 import '../models/thermal_data.dart';
 import '../widgets/gpu_card.dart';
+import '../widgets/cpu_card.dart';
 import '../widgets/temp_arc.dart';
 import 'connection_screen.dart';
+import 'alert_settings_screen.dart';
 
 class ThermalScreen extends StatelessWidget {
   const ThermalScreen({super.key});
@@ -22,10 +24,55 @@ class ThermalScreen extends StatelessWidget {
               if (provider.report == null)
                 const SliverFillRemaining(child: _LoadingView())
               else ...[
+                // Active alert banner
+                if (provider.report!.overallLevel != ThermalLevel.normal)
+                  _AlertBanner(report: provider.report!),
                 _SummaryHeader(report: provider.report!),
-                _GpuList(gpus: provider.report!.gpus),
-                if (provider.report!.systemTemps.isNotEmpty)
-                  _SystemTempsSection(entries: provider.report!.systemTemps),
+
+                // GPU section (Blackwell B200)
+                if (provider.report!.hasGpus) ...[
+                  _SectionLabel(
+                    icon: Icons.memory,
+                    color: const Color(0xFF0A84FF),
+                    label: 'BLACKWELL GPU',
+                  ),
+                  _GpuList(gpus: provider.report!.gpus),
+                ],
+
+                // Grace CPU section
+                if (provider.report!.hasCpu) ...[
+                  _SectionLabel(
+                    icon: Icons.developer_board,
+                    color: const Color(0xFF30D158),
+                    label: 'GRACE CPU  •  NEOVERSE V2',
+                  ),
+                  SliverToBoxAdapter(
+                    child: CpuCard(cpu: provider.report!.graceCpu!),
+                  ),
+                ],
+
+                // Board / chipset sensors
+                if (provider.report!.hasBoardSensors) ...[
+                  _SectionLabel(
+                    icon: Icons.settings_input_component,
+                    color: const Color(0xFFFF9500),
+                    label: 'BOARD & CHIPSET SENSORS',
+                  ),
+                  _BoardSensorsSection(
+                      entries: provider.report!.boardSensors),
+                ],
+
+                // System thermal zones
+                if (provider.report!.systemTemps.isNotEmpty) ...[
+                  _SectionLabel(
+                    icon: Icons.thermostat,
+                    color: Colors.white38,
+                    label: 'SYSTEM THERMAL ZONES',
+                  ),
+                  _SystemTempsSection(
+                      entries: provider.report!.systemTemps),
+                ],
+
                 _Footer(report: provider.report!),
                 const SliverToBoxAdapter(child: SizedBox(height: 40)),
               ],
@@ -37,12 +84,15 @@ class ThermalScreen extends StatelessWidget {
   }
 }
 
+// ── App bar ───────────────────────────────────────────────────────────────────
+
 class _AppBar extends StatelessWidget {
   final ConnectionProvider provider;
   const _AppBar({required this.provider});
 
   @override
   Widget build(BuildContext context) {
+    final hasAlert = provider.hasActiveAlert;
     return SliverAppBar(
       pinned: true,
       backgroundColor: Colors.black,
@@ -55,7 +105,7 @@ class _AppBar extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                'Thermal Report',
+                'DGX Thermal',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
@@ -82,6 +132,37 @@ class _AppBar extends StatelessWidget {
             icon: const Icon(Icons.refresh, color: Colors.white54),
             onPressed: provider.fetchReport,
           ),
+        // Alert settings button with badge if alerts exist
+        Stack(
+          children: [
+            IconButton(
+              icon: Icon(
+                Icons.notifications_outlined,
+                color: hasAlert
+                    ? const Color(0xFFFF9500)
+                    : Colors.white54,
+              ),
+              onPressed: () => Navigator.push(
+                context,
+                CupertinoPageRoute(
+                    builder: (_) => const AlertSettingsScreen()),
+              ),
+            ),
+            if (provider.alertHistory.isNotEmpty)
+              Positioned(
+                right: 8,
+                top: 8,
+                child: Container(
+                  width: 8,
+                  height: 8,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFFF3B30),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
+          ],
+        ),
         _RefreshMenu(provider: provider),
         IconButton(
           icon: const Icon(Icons.power_settings_new, color: Color(0xFFFF3B30)),
@@ -159,6 +240,92 @@ class _RefreshMenu extends StatelessWidget {
   }
 }
 
+// ── Alert banner ──────────────────────────────────────────────────────────────
+
+class _AlertBanner extends StatelessWidget {
+  final ThermalReport report;
+  const _AlertBanner({required this.report});
+
+  @override
+  Widget build(BuildContext context) {
+    final isCritical = report.overallLevel == ThermalLevel.critical;
+    final color = isCritical ? const Color(0xFFFF3B30) : const Color(0xFFFF9500);
+    final label = isCritical ? 'CRITICAL TEMPERATURE' : 'TEMPERATURE WARNING';
+    final icon = isCritical ? Icons.error : Icons.warning_amber;
+
+    return SliverToBoxAdapter(
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: 0.5)),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: color, size: 18),
+            const SizedBox(width: 10),
+            Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontWeight: FontWeight.w700,
+                fontSize: 12,
+                letterSpacing: 0.5,
+              ),
+            ),
+            const Spacer(),
+            Text(
+              'Max: ${report.maxGpuTemp.toStringAsFixed(0)}°C',
+              style: TextStyle(color: color, fontSize: 12),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Section label ─────────────────────────────────────────────────────────────
+
+class _SectionLabel extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String label;
+  const _SectionLabel({
+    required this.icon,
+    required this.color,
+    required this.label,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SliverToBoxAdapter(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
+        child: Row(
+          children: [
+            Icon(icon, color: color, size: 13),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: color,
+                letterSpacing: 1.2,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Summary header ────────────────────────────────────────────────────────────
+
 class _SummaryHeader extends StatelessWidget {
   final ThermalReport report;
   const _SummaryHeader({required this.report});
@@ -215,7 +382,8 @@ class _SummaryHeader extends StatelessWidget {
                         decoration: BoxDecoration(
                           color: _statusColor.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: _statusColor.withValues(alpha: 0.5)),
+                          border:
+                              Border.all(color: _statusColor.withValues(alpha: 0.5)),
                         ),
                         child: Text(
                           _statusLabel,
@@ -232,12 +400,18 @@ class _SummaryHeader extends StatelessWidget {
                   const SizedBox(height: 8),
                   _SummaryStat(
                     label: 'GPUs',
-                    value: report.gpus.length.toString(),
+                    value: '${report.gpus.length} × Blackwell B200',
                   ),
                   _SummaryStat(
-                    label: 'Peak Temp',
+                    label: 'Peak',
                     value: '${report.maxGpuTemp.toStringAsFixed(0)}°C',
                   ),
+                  if (report.graceCpu != null)
+                    _SummaryStat(
+                      label: 'CPU',
+                      value:
+                          '${report.graceCpu!.maxTempC.toStringAsFixed(0)}°C  •  ${report.graceCpu!.load1m.toStringAsFixed(2)} load',
+                    ),
                   _SummaryStat(
                     label: 'Driver',
                     value: report.driverVersion,
@@ -267,12 +441,15 @@ class _SummaryStat extends StatelessWidget {
             '$label: ',
             style: const TextStyle(fontSize: 12, color: Colors.white38),
           ),
-          Text(
-            value,
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: Colors.white70,
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: Colors.white70,
+              ),
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ],
@@ -280,6 +457,8 @@ class _SummaryStat extends StatelessWidget {
     );
   }
 }
+
+// ── GPU list ──────────────────────────────────────────────────────────────────
 
 class _GpuList extends StatelessWidget {
   final List<GpuThermalData> gpus;
@@ -310,6 +489,105 @@ class _GpuList extends StatelessWidget {
   }
 }
 
+// ── Board sensors ─────────────────────────────────────────────────────────────
+
+class _BoardSensorsSection extends StatelessWidget {
+  final List<BoardSensorEntry> entries;
+  const _BoardSensorsSection({required this.entries});
+
+  @override
+  Widget build(BuildContext context) {
+    return SliverToBoxAdapter(
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1C1C1E),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          children: [
+            ...entries.map((e) => _BoardSensorRow(entry: e)),
+            const SizedBox(height: 4),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BoardSensorRow extends StatelessWidget {
+  final BoardSensorEntry entry;
+  const _BoardSensorRow({required this.entry});
+
+  Color get _color {
+    switch (entry.level) {
+      case ThermalLevel.critical:
+        return const Color(0xFFFF3B30);
+      case ThermalLevel.warning:
+        return const Color(0xFFFF9500);
+      case ThermalLevel.normal:
+        return const Color(0xFF30D158);
+    }
+  }
+
+  String get _sourceTag {
+    switch (entry.source) {
+      case BoardSensorSource.ipmi:
+        return 'IPMI';
+      case BoardSensorSource.nvsm:
+        return 'NVSM';
+      case BoardSensorSource.sensors:
+        return 'LM';
+      case BoardSensorSource.unknown:
+        return '';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
+      child: Row(
+        children: [
+          Icon(Icons.thermostat, color: _color, size: 14),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              entry.name,
+              style: const TextStyle(fontSize: 13, color: Colors.white70),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (_sourceTag.isNotEmpty)
+            Container(
+              margin: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+              decoration: BoxDecoration(
+                color: Colors.white10,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                _sourceTag,
+                style: const TextStyle(
+                    fontSize: 9, color: Colors.white38, letterSpacing: 0.5),
+              ),
+            ),
+          Text(
+            '${entry.tempC.toStringAsFixed(1)}°C',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: _color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── System temps (thermal zones) ──────────────────────────────────────────────
+
 class _SystemTempsSection extends StatelessWidget {
   final List<SystemThermalEntry> entries;
   const _SystemTempsSection({required this.entries});
@@ -318,26 +596,13 @@ class _SystemTempsSection extends StatelessWidget {
   Widget build(BuildContext context) {
     return SliverToBoxAdapter(
       child: Container(
-        margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+        margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
         decoration: BoxDecoration(
           color: const Color(0xFF1C1C1E),
           borderRadius: BorderRadius.circular(16),
         ),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 14, 16, 4),
-              child: Text(
-                'SYSTEM TEMPERATURES',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.white38,
-                  letterSpacing: 1.2,
-                ),
-              ),
-            ),
             ...entries.map((e) => _SysTempRow(entry: e)),
             const SizedBox(height: 8),
           ],
@@ -386,6 +651,8 @@ class _SysTempRow extends StatelessWidget {
   }
 }
 
+// ── Footer ────────────────────────────────────────────────────────────────────
+
 class _Footer extends StatelessWidget {
   final ThermalReport report;
   const _Footer({required this.report});
@@ -408,6 +675,8 @@ class _Footer extends StatelessWidget {
     );
   }
 }
+
+// ── Loading view ──────────────────────────────────────────────────────────────
 
 class _LoadingView extends StatelessWidget {
   const _LoadingView();

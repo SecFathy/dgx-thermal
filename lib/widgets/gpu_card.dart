@@ -30,6 +30,18 @@ class GpuCard extends StatelessWidget {
             _BarRow(label: 'VRAM', value: gpu.memUsedPct, color: const Color(0xFF5E5CE6)),
             const SizedBox(height: 8),
             _BarRow(label: 'PWR', value: gpu.powerUsedPct, color: const Color(0xFFFF9500)),
+            // HBM3e memory temperature row (Blackwell)
+            if (gpu.hasMemTemp) ...[
+              const SizedBox(height: 14),
+              const Divider(color: Colors.white12, height: 1),
+              const SizedBox(height: 10),
+              _HbmTempRow(gpu: gpu),
+            ],
+            // Clocks row
+            if (gpu.smClockMHz > 0 || gpu.memClockMHz > 0) ...[
+              const SizedBox(height: 10),
+              _ClocksRow(gpu: gpu),
+            ],
           ],
         ),
       ),
@@ -37,7 +49,10 @@ class GpuCard extends StatelessWidget {
   }
 
   Color get _borderColor {
-    switch (gpu.thermalLevel) {
+    // Use worst of die temp and HBM3e temp
+    final worst = [gpu.thermalLevel, if (gpu.hasMemTemp) gpu.memThermalLevel]
+        .reduce((a, b) => b.index > a.index ? b : a);
+    switch (worst) {
       case ThermalLevel.critical:
         return const Color(0xFFFF3B30);
       case ThermalLevel.warning:
@@ -106,7 +121,9 @@ class _MetricsRow extends StatelessWidget {
         ),
         _StatColumn(
           label: 'Fan',
-          value: '${gpu.fanSpeedPct.toStringAsFixed(0)}%',
+          value: gpu.fanSpeedPct > 0
+              ? '${gpu.fanSpeedPct.toStringAsFixed(0)}%'
+              : 'N/A',
           icon: Icons.air,
           color: const Color(0xFF64D2FF),
         ),
@@ -118,8 +135,9 @@ class _MetricsRow extends StatelessWidget {
         ),
         _StatColumn(
           label: 'VRAM',
-          value: '${(gpu.memUsedMiB / 1024).toStringAsFixed(1)}G\n/ ${(gpu.memTotalMiB / 1024).toStringAsFixed(0)}G',
-          icon: Icons.memory,
+          value:
+              '${(gpu.memUsedMiB / 1024).toStringAsFixed(1)}G\n/ ${(gpu.memTotalMiB / 1024).toStringAsFixed(0)}G',
+          icon: Icons.layers,
           color: const Color(0xFF5E5CE6),
         ),
       ],
@@ -204,6 +222,74 @@ class _BarRow extends StatelessWidget {
             textAlign: TextAlign.right,
           ),
         ),
+      ],
+    );
+  }
+}
+
+// HBM3e memory temperature indicator (Blackwell-specific)
+class _HbmTempRow extends StatelessWidget {
+  final GpuThermalData gpu;
+  const _HbmTempRow({required this.gpu});
+
+  Color get _color {
+    switch (gpu.memThermalLevel) {
+      case ThermalLevel.critical:
+        return const Color(0xFFFF3B30);
+      case ThermalLevel.warning:
+        return const Color(0xFFFF9500);
+      case ThermalLevel.normal:
+        return const Color(0xFF5E5CE6);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(Icons.layers, color: _color, size: 14),
+        const SizedBox(width: 6),
+        const Text(
+          'HBM3e Memory',
+          style: TextStyle(fontSize: 12, color: Colors.white54),
+        ),
+        const Spacer(),
+        Text(
+          '${gpu.memTemperatureC.toStringAsFixed(0)}°C',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: _color,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// SM / Memory clock row
+class _ClocksRow extends StatelessWidget {
+  final GpuThermalData gpu;
+  const _ClocksRow({required this.gpu});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        const Icon(Icons.speed, color: Colors.white24, size: 12),
+        const SizedBox(width: 4),
+        if (gpu.smClockMHz > 0)
+          Text(
+            'SM ${gpu.smClockMHz.toStringAsFixed(0)} MHz',
+            style: const TextStyle(fontSize: 11, color: Colors.white30),
+          ),
+        if (gpu.smClockMHz > 0 && gpu.memClockMHz > 0)
+          const Text('  ·  ', style: TextStyle(color: Colors.white24)),
+        if (gpu.memClockMHz > 0)
+          Text(
+            'MEM ${gpu.memClockMHz.toStringAsFixed(0)} MHz',
+            style: const TextStyle(fontSize: 11, color: Colors.white30),
+          ),
       ],
     );
   }

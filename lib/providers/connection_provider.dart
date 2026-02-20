@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../services/ssh_service.dart';
+import '../services/alert_service.dart';
 import '../models/thermal_data.dart';
 
 enum ConnectionState { disconnected, connecting, connected, error }
@@ -15,12 +16,20 @@ class ConnectionProvider extends ChangeNotifier {
   Timer? _autoRefreshTimer;
   int _refreshIntervalSec = 10;
 
+  AlertThresholds _thresholds = const AlertThresholds();
+  final List<AlertEvent> _alertHistory = [];
+  bool _alertPermissionRequested = false;
+
   ConnectionState get state => _state;
   String get errorMessage => _errorMessage;
   ThermalReport? get report => _report;
   bool get refreshing => _refreshing;
   int get refreshIntervalSec => _refreshIntervalSec;
   bool get isConnected => _ssh.isConnected;
+  AlertThresholds get thresholds => _thresholds;
+  List<AlertEvent> get alertHistory => List.unmodifiable(_alertHistory);
+  bool get hasActiveAlert =>
+      _report != null && _report!.overallLevel != ThermalLevel.normal;
 
   Future<void> connect({
     required String host,
@@ -41,6 +50,7 @@ class ConnectionProvider extends ChangeNotifier {
       );
       _state = ConnectionState.connected;
       notifyListeners();
+      await _ensureAlertPermission();
       await fetchReport();
       _startAutoRefresh();
     } catch (e) {
@@ -56,6 +66,15 @@ class ConnectionProvider extends ChangeNotifier {
     notifyListeners();
     try {
       _report = await _ssh.fetchThermalReport();
+      // Evaluate alerts against current thresholds
+      final newAlerts = await AlertService.evaluate(_report!, _thresholds);
+      if (newAlerts.isNotEmpty) {
+        _alertHistory.insertAll(0, newAlerts);
+        // Keep only last 100 alerts
+        if (_alertHistory.length > 100) {
+          _alertHistory.removeRange(100, _alertHistory.length);
+        }
+      }
     } catch (e) {
       _errorMessage = 'Fetch failed: ${_friendlyError(e.toString())}';
     } finally {
@@ -70,6 +89,17 @@ class ConnectionProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  void updateThresholds(AlertThresholds thresholds) {
+    _thresholds = thresholds;
+    AlertService.reset(); // Reset dedup state when thresholds change
+    notifyListeners();
+  }
+
+  void clearAlertHistory() {
+    _alertHistory.clear();
+    notifyListeners();
+  }
+
   void _startAutoRefresh() {
     _autoRefreshTimer?.cancel();
     _autoRefreshTimer = Timer.periodic(
@@ -78,12 +108,19 @@ class ConnectionProvider extends ChangeNotifier {
     );
   }
 
+  Future<void> _ensureAlertPermission() async {
+    if (_alertPermissionRequested) return;
+    _alertPermissionRequested = true;
+    await AlertService.requestPermissions();
+  }
+
   void disconnect() {
     _autoRefreshTimer?.cancel();
     _ssh.disconnect();
     _state = ConnectionState.disconnected;
     _report = null;
     _errorMessage = '';
+    AlertService.reset();
     notifyListeners();
   }
 
